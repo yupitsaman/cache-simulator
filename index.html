@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Level Cache Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Custom styles */
+        body { font-family: 'Inter', sans-serif; }
+        /* Style disabled inputs and buttons */
+        input:disabled, button:disabled {
+            background-color: #e5e7eb; /* Tailwind gray-200 */
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        /* Style result tables */
+        .result-table th, .result-table td { border: 1px solid #d1d5db; padding: 0.5rem; text-align: left; }
+        .result-table th { background-color: #f3f4f6; }
+        /* Fade-in animation */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-in { animation: fadeIn 0.5s ease-out forwards; }
+
+        /* Tree view styling */
+        .tree-node { padding: 0.3rem 0.5rem; margin-bottom: 0.3rem; border-radius: 0.375rem; border: 1px solid; }
+        .tree-indent { margin-left: 1.5rem; }
+        .tree-l1 { background-color: #e0f2fe; border-color: #bae6fd; color: #0c4a6e; } /* sky-100/200/800 */
+        .tree-l2 { background-color: #fef3c7; border-color: #fde68a; color: #78350f; } /* amber-100/200/800 */
+        .tree-l3 { background-color: #fee2e2; border-color: #fecaca; color: #991b1b; } /* red-100/200/800 */
+        .tree-mem { background-color: #e5e7eb; border-color: #d1d5db; color: #374151; } /* gray-200/300/700 */
+        .tree-stats { font-size: 0.8rem; margin-left: 1rem; color: #4b5563; } /* gray-600 */
+
+        /* Animation View Styling */
+        .anim-container { display: flex; justify-content: space-around; align-items: center; padding: 1rem; background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.5rem; min-height: 100px; }
+        .anim-level { text-align: center; padding: 0.75rem 1rem; border: 2px solid transparent; border-radius: 0.375rem; transition: background-color 0.1s, border-color 0.1s, color 0.1s, box-shadow 0.1s; /* Faster transitions */ position: relative; width: 80px; /* Ensure consistent width */ box-sizing: border-box; }
+        .anim-level span { display: block; font-weight: 600; margin-bottom: 0.25rem;}
+        .anim-level small { font-size: 0.75rem; color: #6b7280; }
+        .anim-arrow { font-size: 1.5rem; color: #9ca3af; margin: 0 0.5rem; transition: color 0.1s ease-in-out; /* Faster transitions */ flex-shrink: 0; }
+        /* Highlight states */
+        .anim-hit { border-color: #10b981; background-color: #d1fae5; color: #047857; } /* Green */
+        .anim-miss { border-color: #f87171; background-color: #fee2e2; color: #b91c1c; } /* Red */
+        .anim-active { box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.5); } /* Indigo focus ring */
+        .anim-accessed { border-color: #6b7280; background-color: #e5e7eb; color: #1f2937; } /* Gray for memory access */
+        .anim-arrow-active { color: #4f46e5; } /* Indigo */
+        .anim-status { margin-top: 0.5rem; font-style: italic; font-size: 0.8rem; min-height: 1.2em; /* Reserve space */ }
+
+        /* Speed Control Styling */
+        .speed-control-container { display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-top: 0.5rem; }
+
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-100 p-4 md:p-8">
+    <div class="max-w-6xl mx-auto bg-white p-6 md:p-8 rounded-lg shadow-md">
+        <h1 class="text-2xl md:text-3xl font-bold mb-6 text-center text-gray-800">Multi-Level Cache Simulator</h1>
+
+        <!-- Configuration Section -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <div class="bg-gray-50 p-4 rounded-md border border-gray-200">
+                  <h2 class="text-lg font-semibold mb-3 text-gray-700">Global Settings</h2>
+                  <div class="mb-3">
+                      <label for="policy" class="block text-sm font-medium text-gray-600 mb-1">Replacement Policy:</label>
+                      <select id="policy" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                          <option value="LRU">LRU</option>
+                          <option value="FIFO">FIFO</option>
+                      </select>
+                  </div>
+                  <div>
+                      <label for="memoryLatency" class="block text-sm font-medium text-gray-600 mb-1">Memory Latency (cycles):</label>
+                      <input type="number" id="memoryLatency" value="100" min="1" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                  </div>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div class="bg-gray-50 p-4 rounded-md border border-gray-200">
+                      <h3 class="text-md font-semibold mb-2 text-gray-700">L1 Cache</h3>
+                      <div class="mb-2"><label for="l1Size" class="block text-xs font-medium text-gray-600 mb-1">Size (B):</label><input type="number" id="l1Size" value="32768" min="0" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm"></div>
+                      <div class="mb-2"><label for="l1BlockSize" class="block text-xs font-medium text-gray-600 mb-1">Block (B):</label><input type="number" id="l1BlockSize" value="64" min="1" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm"></div>
+                      <div class="mb-2"><label for="l1Assoc" class="block text-xs font-medium text-gray-600 mb-1">Assoc:</label><input type="number" id="l1Assoc" value="8" min="1" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm"></div>
+                      <div><label for="l1HitLatency" class="block text-xs font-medium text-gray-600 mb-1">Hit (cyc):</label><input type="number" id="l1HitLatency" value="4" min="0" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm"></div>
+                  </div>
+                  <div class="bg-gray-50 p-4 rounded-md border border-gray-200">
+                      <h3 class="text-md font-semibold mb-2 text-gray-700">L2 Cache</h3>
+                       <div class="mb-2"><label for="l2Size" class="block text-xs font-medium text-gray-600 mb-1">Size (B):</label><input type="number" id="l2Size" value="262144" min="0" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm"></div>
+                      <div class="mb-2"><label for="l2BlockSize" class="block text-xs font-medium text-gray-600 mb-1">Block (B):</label><input type="number" id="l2BlockSize" value="64" min="1" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm" disabled><p class="text-xs text-gray-500 mt-1">Uses L1</p></div>
+                      <div class="mb-2"><label for="l2Assoc" class="block text-xs font-medium text-gray-600 mb-1">Assoc:</label><input type="number" id="l2Assoc" value="8" min="1" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm"></div>
+                      <div><label for="l2HitLatency" class="block text-xs font-medium text-gray-600 mb-1">Hit (cyc):</label><input type="number" id="l2HitLatency" value="12" min="0" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm"></div>
+                  </div>
+                  <div class="bg-gray-50 p-4 rounded-md border border-gray-200">
+                      <h3 class="text-md font-semibold mb-2 text-gray-700">L3 Cache</h3>
+                       <div class="mb-2"><label for="l3Size" class="block text-xs font-medium text-gray-600 mb-1">Size (B):</label><input type="number" id="l3Size" value="8388608" min="0" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm"></div>
+                       <div class="mb-2"><label for="l3BlockSize" class="block text-xs font-medium text-gray-600 mb-1">Block (B):</label><input type="number" id="l3BlockSize" value="64" min="1" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm" disabled><p class="text-xs text-gray-500 mt-1">Uses L1</p></div>
+                      <div class="mb-2"><label for="l3Assoc" class="block text-xs font-medium text-gray-600 mb-1">Assoc:</label><input type="number" id="l3Assoc" value="16" min="1" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm"></div>
+                      <div><label for="l3HitLatency" class="block text-xs font-medium text-gray-600 mb-1">Hit (cyc):</label><input type="number" id="l3HitLatency" value="30" min="0" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm"></div>
+                  </div>
+              </div>
+          </div>
+
+        <!-- === START: Trace Generation Section === -->
+        <div class="mb-6 bg-indigo-50 p-4 rounded-md border border-indigo-200">
+            <h3 class="text-lg font-semibold mb-3 text-indigo-800">Generate Address Trace</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <div>
+                    <label for="genNumAddresses" class="block text-xs font-medium text-gray-600 mb-1">Number of Addresses:</label>
+                    <input type="number" id="genNumAddresses" value="100" min="1" max="10000" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm">
+                </div>
+                <div>
+                    <label for="genStartAddress" class="block text-xs font-medium text-gray-600 mb-1">Start Address (Hex):</label>
+                    <input type="text" id="genStartAddress" value="0x1000" placeholder="e.g., 0x1000" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm">
+                </div>
+                <div>
+                    <label for="genEndAddress" class="block text-xs font-medium text-gray-600 mb-1">End Address (Hex):</label>
+                    <input type="text" id="genEndAddress" value="0x8000" placeholder="e.g., 0x8000" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm">
+                </div>
+                 <div>
+                    <label for="genStride" class="block text-xs font-medium text-gray-600 mb-1">Stride (Bytes):</label>
+                    <input type="number" id="genStride" value="4" min="1" class="w-full p-1.5 border border-gray-300 rounded-md text-sm shadow-sm">
+                </div>
+            </div>
+            <div class="flex justify-center">
+                <button id="generateTraceBtn" class="px-4 py-2 bg-indigo-500 text-white font-semibold rounded-md shadow-sm hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-400 transition duration-150 ease-in-out">
+                    Generate & Populate Trace Below
+                </button>
+            </div>
+             <p class="text-xs text-gray-500 text-center mt-2">Note: After generating, click "Load Trace & Reset Sim" to use the new trace.</p>
+        </div>
+        <!-- === END: Trace Generation Section === -->
+
+        <!-- Trace Input -->
+        <div class="mb-6">
+            <label for="addressTrace" class="block text-sm font-medium text-gray-700 mb-1">Memory Access Trace (comma-separated hex or decimal addresses):</label>
+            <textarea id="addressTrace" rows="4" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" placeholder="Enter trace here or generate above..."></textarea>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex flex-col sm:flex-row justify-center items-center space-y-4 sm:space-y-0 sm:space-x-4 mb-8">
+            <button id="loadResetBtn" class="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white font-semibold rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-150 ease-in-out">
+                Load Trace & Reset Sim
+            </button>
+            <div class="flex space-x-2">
+                 <button id="startBtn" disabled class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out">
+                     Start Anim
+                 </button>
+                 <button id="pauseBtn" disabled class="px-4 py-2 bg-yellow-500 text-white font-semibold rounded-md shadow-sm hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-400 transition duration-150 ease-in-out">
+                     Pause
+                 </button>
+                 <button id="resumeBtn" disabled class="px-4 py-2 bg-green-600 text-white font-semibold rounded-md shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-150 ease-in-out">
+                     Resume
+                 </button>
+            </div>
+             <div class="flex items-center space-x-2 text-sm">
+                 <label for="speedControl" class="text-gray-700">Speed:</label>
+                 <input type="range" id="speedControl" min="0" max="500" value="10" step="1" class="w-32 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700">
+                 <span id="speedValue" class="text-gray-600 w-12 text-right">10ms</span>
+             </div>
+        </div>
+
+        <!-- Message Area -->
+        <div id="messageArea" class="mb-6 text-center min-h-[1.5em]"></div>
+
+        <!-- Animation View -->
+        <div id="stepViewSection" class="mb-8 hidden">
+             <h3 class="text-lg font-semibold mb-2 text-gray-700">Animation</h3>
+             <div class="mb-2 text-sm">
+                 Processing Access <span id="stepCounter" class="font-medium">0</span>/<span id="stepTotal" class="font-medium">0</span>:
+                 Address <code id="stepAddress" class="text-indigo-700 bg-indigo-100 px-1 rounded">N/A</code>
+             </div>
+             <div class="anim-container">
+                 <div id="animL1" class="anim-level"><span>L1</span><small>Cache</small><div class="anim-status"></div></div>
+                 <div id="animArrow1" class="anim-arrow">→</div>
+                 <div id="animL2" class="anim-level"><span>L2</span><small>Cache</small><div class="anim-status"></div></div>
+                 <div id="animArrow2" class="anim-arrow">→</div>
+                 <div id="animL3" class="anim-level"><span>L3</span><small>Cache</small><div class="anim-status"></div></div>
+                 <div id="animArrow3" class="anim-arrow">→</div>
+                 <div id="animMem" class="anim-level"><span>Mem</span><small>Memory</small><div class="anim-status"></div></div>
+             </div>
+              <div class="mt-2 text-sm text-center">Step Latency: <span id="stepLatency" class="font-medium">0</span> cycles</div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="resultsSection" class="hidden">
+            <h2 class="text-xl md:text-2xl font-bold mb-4 text-center text-gray-800">Final Simulation Results</h2>
+             <div class="mb-6 fade-in">
+                 <h3 class="text-lg font-semibold mb-2 text-gray-700">Cache Hierarchy Stats</h3>
+                 <div id="treeView" class="p-4 bg-gray-50 rounded-md border border-gray-200 text-sm"></div>
+             </div>
+             <div class="bg-blue-50 p-4 rounded-md border border-blue-200 mb-6 fade-in">
+                 <h3 class="text-lg font-semibold mb-2 text-blue-800">Overall Summary</h3>
+                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                     <p><strong>Total Accesses:</strong> <span id="totalAccesses"></span></p>
+                     <p><strong>Total Cycles:</strong> <span id="totalCycles"></span></p>
+                     <p><strong>Avg. Access Time (AMAT):</strong> <span id="amat"></span> cycles</p>
+                 </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div id="l1Results" class="bg-green-50 p-4 rounded-md border border-green-200 fade-in"><h3 class="text-lg font-semibold mb-2 text-green-800">L1 Stats</h3><table class="w-full text-sm result-table"><tbody><tr><th>Accesses</th><td id="l1Accesses"></td></tr><tr><th>Hits</th><td id="l1Hits"></td></tr><tr><th>Misses</th><td id="l1Misses"></td></tr><tr><th>Hit Rate</th><td id="l1HitRate"></td></tr><tr><th>Miss Rate</th><td id="l1MissRate"></td></tr></tbody></table></div>
+                <div id="l2Results" class="bg-yellow-50 p-4 rounded-md border border-yellow-200 fade-in"><h3 class="text-lg font-semibold mb-2 text-yellow-800">L2 Stats</h3><table class="w-full text-sm result-table"><tbody><tr><th>Accesses</th><td id="l2Accesses"></td></tr><tr><th>Hits</th><td id="l2Hits"></td></tr><tr><th>Misses</th><td id="l2Misses"></td></tr><tr><th>Hit Rate</th><td id="l2HitRate"></td></tr><tr><th>Miss Rate</th><td id="l2MissRate"></td></tr></tbody></table></div>
+                <div id="l3Results" class="bg-red-50 p-4 rounded-md border border-red-200 fade-in"><h3 class="text-lg font-semibold mb-2 text-red-800">L3 Stats</h3><table class="w-full text-sm result-table"><tbody><tr><th>Accesses</th><td id="l3Accesses"></td></tr><tr><th>Hits</th><td id="l3Hits"></td></tr><tr><th>Misses</th><td id="l3Misses"></td></tr><tr><th>Hit Rate</th><td id="l3HitRate"></td></tr><tr><th>Miss Rate</th><td id="l3MissRate"></td></tr></tbody></table></div>
+            </div>
+            <div class="fade-in">
+                 <h3 class="text-lg font-semibold mb-4 text-center text-gray-700">Visual Comparisons</h3>
+                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                     <div><canvas id="hitsMissesChart"></canvas></div>
+                     <div><canvas id="hitRateChart"></canvas></div>
+                 </div>
+                 <div class="mt-8">
+                      <h3 class="text-lg font-semibold mb-2 text-center text-gray-700">Memory Access Locality Pattern</h3>
+                      <p id="localityNote" class="text-xs text-center text-gray-500 mb-2"></p>
+                      <div style="height: 400px;"><canvas id="localityChart"></canvas></div>
+                 </div>
+             </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Global state variables ---
+        let simulatorInstance = null;
+        let addressTrace = []; // Array of BigInt addresses
+        let localityData = []; // For scatter plot [{x: accessIndex, y: addressNumber}]
+        const LOCALITY_PLOT_MAX_POINTS = 5000; // Limit points for performance
+        let currentAddressIndex = 0;
+        let activeCharts = {}; // Store chart instances
+        let animationTimerId = null; // ID for setTimeout
+        let animationDelay = 10; // *** FASTER Default delay in ms ***
+        let isAnimationPaused = false;
+        let isAnimationRunning = false; // Track if animation is active
+
+        // --- DOM Element References ---
+        const loadResetBtn = document.getElementById('loadResetBtn');
+        const startBtn = document.getElementById('startBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const resumeBtn = document.getElementById('resumeBtn');
+        const speedControl = document.getElementById('speedControl');
+        const speedValue = document.getElementById('speedValue');
+        const resultsSection = document.getElementById('resultsSection');
+        const stepViewSection = document.getElementById('stepViewSection');
+        const stepCounterEl = document.getElementById('stepCounter');
+        const stepTotalEl = document.getElementById('stepTotal');
+        const stepAddressEl = document.getElementById('stepAddress');
+        const stepLatencyEl = document.getElementById('stepLatency');
+        const localityNoteEl = document.getElementById('localityNote');
+        const messageArea = document.getElementById('messageArea');
+        const addressTraceInput = document.getElementById('addressTrace'); // Existing textarea
+        // --- NEW Trace Generation Elements ---
+        const generateTraceBtn = document.getElementById('generateTraceBtn');
+        const genNumAddressesInput = document.getElementById('genNumAddresses');
+        const genStartAddressInput = document.getElementById('genStartAddress');
+        const genEndAddressInput = document.getElementById('genEndAddress');
+        const genStrideInput = document.getElementById('genStride');
+
+
+        // --- Helper Functions ---
+        function isPowerOfTwo(n) { const num = BigInt(n); return num > 0n && (num & (num - 1n)) === 0n; }
+        function log2(n) { const num = BigInt(n); if (num <= 0n) return 0; let count = 0; let temp = num; while (temp > 1n) { temp >>= 1n; count++; } return count; }
+        function trim(str) { return str.replace(/^\s+|\s+$/g, ''); }
+        function showMessage(message, isError = false) {
+            messageArea.textContent = message;
+            messageArea.className = `mb-6 text-center min-h-[1.5em] ${isError ? 'text-red-600' : 'text-green-600'} font-medium`;
+            if (!isError && !message.startsWith("Simulation finished") && !message.startsWith("Generated")) { // Don't clear generation message immediately
+                 setTimeout(() => { if (messageArea.textContent === message) { messageArea.textContent = ''; messageArea.className = 'mb-6 text-center min-h-[1.5em]'; } }, 5000);
+            }
+        }
+        function setConfigEditable(editable) {
+            const inputs = [ document.getElementById('policy'), document.getElementById('memoryLatency'), document.getElementById('l1Size'), document.getElementById('l1BlockSize'), document.getElementById('l1Assoc'), document.getElementById('l1HitLatency'), document.getElementById('l2Size'), document.getElementById('l2Assoc'), document.getElementById('l2HitLatency'), document.getElementById('l3Size'), document.getElementById('l3Assoc'), document.getElementById('l3HitLatency'), addressTraceInput, // Include textarea
+                           // Also enable/disable generation inputs
+                           genNumAddressesInput, genStartAddressInput, genEndAddressInput, genStrideInput, generateTraceBtn ];
+            inputs.forEach(input => input.disabled = !editable);
+            // Keep derived block sizes always disabled
+            document.getElementById('l2BlockSize').disabled = true;
+            document.getElementById('l3BlockSize').disabled = true;
+        }
+
+        // --- Cache Simulation Classes (Unchanged) ---
+        class CacheLine {
+             constructor() { this.valid = false; this.tag = 0n; this.lastUsedTimestamp = 0n; this.fifoTimestamp = 0n;}
+        }
+        class CacheLevel {
+             constructor(config, nextLevel = null, levelNum, memoryLatency = 0) {
+                this.config = config; this.nextLevel = nextLevel; this.levelNum = levelNum;
+                this.memoryLatencyCycles = BigInt(memoryLatency); this.sets = []; this.hits = 0n; this.misses = 0n; this.fifoCounter = 0n;
+
+                 if (this.config.sizeBytes < 0 || this.config.blockSizeBytes <= 0 || this.config.associativity <= 0 || this.config.hitLatencyCycles < 0) {
+                     throw new Error(`L${levelNum}: Size/Latency must be non-negative. Block/Assoc must be positive.`);
+                 }
+                 if (this.config.sizeBytes > 0 && BigInt(this.config.sizeBytes) % BigInt(this.config.blockSizeBytes) !== 0n) {
+                     console.warn(`L${levelNum}: Size (${this.config.sizeBytes}) is not perfectly divisible by Block Size (${this.config.blockSizeBytes}).`);
+                 }
+
+                this.calculateDerivedParameters();
+
+                 if (this.numBlocks > 0n && BigInt(this.config.associativity) > this.numBlocks) {
+                     console.warn(`L${levelNum}: Assoc (${this.config.associativity}) > Blocks (${this.numBlocks}). Setting fully associative.`);
+                     this.config.associativity = Number(this.numBlocks);
+                     this.calculateDerivedParameters();
+                 } else if (this.numBlocks > 0n && this.config.associativity > 0 && this.numBlocks % BigInt(this.config.associativity) !== 0n) {
+                      if (BigInt(this.config.associativity) !== this.numBlocks) {
+                        console.warn(`L${levelNum}: Blocks (${this.numBlocks}) not perfectly divisible by Assoc (${this.config.associativity}). This is unusual but allowed.`);
+                      }
+                 }
+
+                 this.sets = new Array(Number(this.numSets));
+                 for (let i = 0; i < this.numSets; i++) {
+                     this.sets[i] = new Array(this.config.associativity);
+                     for (let j = 0; j < this.config.associativity; j++) {
+                         this.sets[i][j] = new CacheLine();
+                     }
+                 }
+                // Muted detailed init logs for brevity
+                // console.log(`Initialized L${levelNum}: Size=${this.config.sizeBytes}B, Block=${this.config.blockSizeBytes}B, Assoc=${this.config.associativity}, Sets=${this.numSets}, Policy=${this.config.policy}, Latency=${this.config.hitLatencyCycles}`);
+                // console.log(`  L${levelNum} Calc: Offset=${this.offsetBits}, Index=${this.indexBits}, Tag=${this.tagBits}`);
+             }
+
+             calculateDerivedParameters() {
+                const sizeBytes = BigInt(this.config.sizeBytes); const blockSizeBytes = BigInt(this.config.blockSizeBytes); let associativity = BigInt(this.config.associativity);
+                if (sizeBytes <= 0n || blockSizeBytes <= 0n) { this.numBlocks = 0n; this.numSets = 0n; this.config.associativity = 0;
+                } else if (blockSizeBytes > sizeBytes) { console.warn(`L${this.levelNum}: Block Size > Size. Treating as 1 block, assoc=1.`); this.numBlocks = 1n; associativity = 1n; this.config.associativity = 1; this.numSets = 1n;
+                } else { this.numBlocks = sizeBytes / blockSizeBytes; if (associativity > this.numBlocks) { associativity = this.numBlocks; this.config.associativity = Number(this.numBlocks); } if (associativity === 0n) { this.numSets = 0n; } else { this.numSets = this.numBlocks / associativity; } }
+                this.offsetBits = blockSizeBytes <= 1n ? 0 : log2(blockSizeBytes); this.indexBits = this.numSets <= 1n ? 0 : Math.ceil(Math.log2(Number(this.numSets)));
+                const totalAddressBits = 64; if (this.offsetBits + this.indexBits > totalAddressBits) { throw new Error(`L${this.levelNum}: Offset (${this.offsetBits}) + Index (${this.indexBits}) bits > ${totalAddressBits}.`); } this.tagBits = totalAddressBits - this.indexBits - this.offsetBits;
+                if (this.numSets > 1n && !isPowerOfTwo(this.numSets)) { console.warn(`L${this.levelNum}: Num sets (${this.numSets}) not power of 2. Using ${this.indexBits} index bits.`); } if (blockSizeBytes > 1n && !isPowerOfTwo(blockSizeBytes)) { console.warn(`L${this.levelNum}: Block size (${blockSizeBytes}) not power of 2. Using ${this.offsetBits} offset bits.`); }
+             }
+             extractTag(address) { if (this.tagBits <= 0) return 0n; const shift = BigInt(this.offsetBits + this.indexBits); return address >> shift; }
+             extractIndex(address) { if (this.indexBits === 0 || this.numSets <= 1n) return 0n; const temp = address >> BigInt(this.offsetBits); const mask = (1n << BigInt(this.indexBits)) - 1n; let index = temp & mask; index = index % this.numSets; return index; }
+             findVictim(setIndex, accessCounter) { if (this.numSets === 0n || this.config.associativity === 0) return -1; const set = this.sets[setIndex]; let victim = -1; for (let i = 0; i < this.config.associativity; i++) { if (!set[i].valid) return i; } if (this.config.policy === 'LRU') { let minTs = -1n; victim = 0; for (let i = 0; i < this.config.associativity; i++) { if (minTs === -1n || set[i].lastUsedTimestamp < minTs) { minTs = set[i].lastUsedTimestamp; victim = i; } } } else if (this.config.policy === 'FIFO') { let minTs = -1n; victim = 0; for (let i = 0; i < this.config.associativity; i++) { if (minTs === -1n || set[i].fifoTimestamp < minTs) { minTs = set[i].fifoTimestamp; victim = i; } } } else { console.error(`Unsupported policy: ${this.config.policy}`); victim = 0; } return victim; }
+             updateReplacementPolicy(setIndex, lineIndex, accessCounter) { if (this.numSets === 0n || this.config.associativity === 0 || lineIndex < 0) return; const line = this.sets[setIndex][lineIndex]; if (this.config.policy === 'LRU') { line.lastUsedTimestamp = accessCounter; } }
+             getAccesses() { return this.hits + this.misses; } getHits() { return this.hits; } getMisses() { return this.misses; } getHitRate() { const total = this.getAccesses(); return total === 0n ? 0.0 : Number(this.hits) / Number(total); } getMissRate() { const total = this.getAccesses(); return total === 0n ? 0.0 : Number(this.misses) / Number(total); }
+             accessStep(address, accessCounter) {
+                 const stepResult = { level: this.levelNum, hit: false, latency: 0n, totalLatency: 0n, nextLevelResult: null };
+                 if (this.numSets === 0n || this.config.associativity === 0) { this.misses++; stepResult.hit = false; stepResult.latency = 0n; if (this.nextLevel) { stepResult.nextLevelResult = this.nextLevel.accessStep(address, accessCounter); stepResult.totalLatency = stepResult.nextLevelResult.totalLatency; } else { stepResult.totalLatency = this.memoryLatencyCycles; } return stepResult; }
+                 stepResult.latency = BigInt(this.config.hitLatencyCycles); const tag = this.extractTag(address); const index = Number(this.extractIndex(address)); const currentSet = this.sets[index];
+                 for (let i = 0; i < this.config.associativity; i++) { if (currentSet[i].valid && currentSet[i].tag === tag) { this.hits++; this.updateReplacementPolicy(index, i, accessCounter); stepResult.hit = true; stepResult.totalLatency = stepResult.latency; return stepResult; } }
+                 this.misses++; stepResult.hit = false; let downstreamLatency = 0n; if (this.nextLevel) { stepResult.nextLevelResult = this.nextLevel.accessStep(address, accessCounter); downstreamLatency = stepResult.nextLevelResult.totalLatency; } else { downstreamLatency = this.memoryLatencyCycles; } stepResult.totalLatency = stepResult.latency + downstreamLatency;
+                 const victimIndex = this.findVictim(index, accessCounter); if (victimIndex !== -1) { const victimLine = currentSet[victimIndex]; victimLine.valid = true; victimLine.tag = tag; this.updateReplacementPolicy(index, victimIndex, accessCounter); if (this.config.policy === 'FIFO') { victimLine.fifoTimestamp = this.fifoCounter++; } } else { console.error(`L${this.levelNum}: Could not find victim line in set ${index}.`); } return stepResult;
+             }
+        }
+        class CacheSimulator {
+             constructor(config) {
+                 this.config = config; this.totalAccesses = 0n; this.totalCycles = 0n; this.globalAccessCounter = 0n;
+                 try { const memLatency = config.memoryLatencyCycles || 0; this.l3Cache = new CacheLevel(config.l3Config, null, 3, memLatency); this.l2Cache = new CacheLevel(config.l2Config, this.l3Cache, 2); this.l1Cache = new CacheLevel(config.l1Config, this.l2Cache, 1); } catch (error) { console.error("Initialization Error:", error); throw new Error(`Initialization Error: ${error.message}`); }
+                 console.log(`Simulator Initialized. Mem Latency: ${config.memoryLatencyCycles}, Policy: ${config.policy}`);
+             }
+             accessMemoryStep(address) { this.totalAccesses++; this.globalAccessCounter++; const stepDetails = this.l1Cache.accessStep(address, this.globalAccessCounter); this.totalCycles += stepDetails.totalLatency; return { address: address, totalLatencyThisStep: stepDetails.totalLatency, path: stepDetails }; }
+             getResults() { let memAccesses = 0n; if (this.l3Cache && this.l3Cache.numSets > 0n) memAccesses = this.l3Cache.getMisses(); else if (this.l2Cache && this.l2Cache.numSets > 0n) memAccesses = this.l2Cache.getMisses(); else if (this.l1Cache && this.l1Cache.numSets > 0n) memAccesses = this.l1Cache.getMisses(); else memAccesses = this.totalAccesses; const amat = this.totalAccesses > 0n ? Number(this.totalCycles) / Number(this.totalAccesses) : 0; return { totalAccesses: this.totalAccesses, totalCycles: this.totalCycles, amat: amat, l1: { accesses: this.l1Cache.getAccesses(), hits: this.l1Cache.getHits(), misses: this.l1Cache.getMisses(), hitRate: this.l1Cache.getHitRate(), missRate: this.l1Cache.getMissRate() }, l2: { accesses: this.l2Cache.getAccesses(), hits: this.l2Cache.getHits(), misses: this.l2Cache.getMisses(), hitRate: this.l2Cache.getHitRate(), missRate: this.l2Cache.getMissRate() }, l3: { accesses: this.l3Cache.getAccesses(), hits: this.l3Cache.getHits(), misses: this.l3Cache.getMisses(), hitRate: this.l3Cache.getHitRate(), missRate: this.l3Cache.getMissRate() }, memory: { accesses: memAccesses } }; }
+        }
+
+        // --- Visualization Functions (Unchanged) ---
+        function destroyCharts() { Object.values(activeCharts).forEach(c => { if (c instanceof Chart) c.destroy(); }); activeCharts = {}; }
+        function displayCharts(results) { destroyCharts(); try { const ctxHitsMisses = document.getElementById('hitsMissesChart').getContext('2d'); const ctxHitRate = document.getElementById('hitRateChart').getContext('2d'); const labels = ['L1', 'L2', 'L3']; const hits = [Number(results.l1.hits), Number(results.l2.hits), Number(results.l3.hits)]; const misses = [Number(results.l1.misses), Number(results.l2.misses), Number(results.l3.misses)]; const rates = [results.l1.hitRate * 100, results.l2.hitRate * 100, results.l3.hitRate * 100]; activeCharts.hitsMisses = new Chart(ctxHitsMisses, { type: 'bar', data: { labels: labels, datasets: [{ label: 'Hits', data: hits, backgroundColor: 'rgba(75, 192, 192, 0.6)' }, { label: 'Misses', data: misses, backgroundColor: 'rgba(255, 99, 132, 0.6)' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Hits vs Misses' } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'Count' }, ticks: { precision: 0 } } } } }); activeCharts.hitRate = new Chart(ctxHitRate, { type: 'bar', data: { labels: labels, datasets: [{ label: 'Hit Rate (%)', data: rates, backgroundColor: 'rgba(54, 162, 235, 0.6)' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Hit Rate (%)' }, tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}%` } } }, scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: 'Hit Rate (%)' }, ticks: { callback: v => v + '%' } } } } }); } catch (e) { console.error("Error creating comparison charts:", e); showMessage("Could not display comparison charts.", true); } }
+        function displayTree(results) { const cont = document.getElementById('treeView'); if (!cont) return; try { const l1A = results.l1.accesses.toString(), l1H = results.l1.hits.toString(), l1M = results.l1.misses.toString(); const l2A = results.l2.accesses.toString(), l2H = results.l2.hits.toString(), l2M = results.l2.misses.toString(); const l3A = results.l3.accesses.toString(), l3H = results.l3.hits.toString(), l3M = results.l3.misses.toString(); const memA = results.memory.accesses.toString(); cont.innerHTML = `<div class="tree-node tree-l1"><strong>L1</strong><span class="tree-stats">(Acc: ${l1A}, H: ${l1H}, M: ${l1M})</span><div class="tree-indent"><div class="tree-node tree-l2"><strong>L2</strong><span class="tree-stats">(Acc: ${l2A}, H: ${l2H}, M: ${l2M})</span><div class="tree-indent"><div class="tree-node tree-l3"><strong>L3</strong><span class="tree-stats">(Acc: ${l3A}, H: ${l3H}, M: ${l3M})</span><div class="tree-indent"><div class="tree-node tree-mem"><strong>Mem</strong><span class="tree-stats">(Acc: ${memA})</span></div></div></div></div></div></div></div>`; } catch (e) { console.error("Error creating tree view:", e); cont.innerHTML = '<p class="text-red-500">Error displaying tree view.</p>'; } }
+        function displayLocalityChart(data, isSampled) { const ctxLocality = document.getElementById('localityChart')?.getContext('2d'); if (!ctxLocality) { console.error("Locality chart canvas not found"); return; } localityNoteEl.textContent = isSampled ? `Showing first ${LOCALITY_PLOT_MAX_POINTS} accesses due to large trace size.` : ''; if (activeCharts.locality instanceof Chart) { activeCharts.locality.destroy(); } try { activeCharts.locality = new Chart(ctxLocality, { type: 'scatter', data: { datasets: [{ label: 'Memory Accesses', data: data, backgroundColor: 'rgba(75, 192, 192, 0.5)', pointRadius: 2, pointHoverRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `Access ${ctx.raw.x}: Address 0x${ctx.raw.y.toString(16).toUpperCase()}` } } }, scales: { x: { type: 'linear', position: 'bottom', title: { display: true, text: 'Memory Access Number' } }, y: { type: 'linear', title: { display: true, text: 'Memory Address (Hex)' }, ticks: { callback: value => Number(value).toString(16).toUpperCase() } } } } }); } catch (e) { console.error("Error creating locality chart:", e); showMessage("Could not display locality chart.", true); localityNoteEl.textContent = 'Error displaying locality chart.'; } }
+        function updateStepVisualization(stepDetails) { const levels = ['L1', 'L2', 'L3', 'Mem']; const arrows = ['Arrow1', 'Arrow2', 'Arrow3']; levels.forEach(level => { const el = document.getElementById(`anim${level}`); if(el) { el.className = 'anim-level'; const statusEl = el.querySelector('.anim-status'); if (statusEl) statusEl.textContent = ''; } }); arrows.forEach(arrow => { const el = document.getElementById(`anim${arrow}`); if(el) el.className = 'anim-arrow'; }); if (!stepDetails || !stepDetails.path) { console.warn("updateStepVisualization called with invalid stepDetails"); return; } stepAddressEl.textContent = `0x${stepDetails.address.toString(16).toUpperCase()}`; stepLatencyEl.textContent = stepDetails.totalLatencyThisStep.toString(); let currentLevelResult = stepDetails.path; let levelNum = 1; let reachedMemory = false; while (currentLevelResult && levelNum <= 3) { const levelEl = document.getElementById(`animL${levelNum}`); const arrowEl = document.getElementById(`animArrow${levelNum}`); const statusEl = levelEl ? levelEl.querySelector('.anim-status') : null; if (levelEl) { levelEl.classList.add('anim-active'); if (currentLevelResult.hit) { levelEl.classList.add('anim-hit'); if(statusEl) statusEl.textContent = 'Hit'; break; } else { levelEl.classList.add('anim-miss'); if(statusEl) statusEl.textContent = 'Miss'; if (arrowEl) arrowEl.classList.add('anim-arrow-active'); if (levelNum === 3 && !currentLevelResult.nextLevelResult) { reachedMemory = true; } currentLevelResult = currentLevelResult.nextLevelResult; levelNum++; } } else { console.warn(`Animation element animL${levelNum} not found`); break; } } if (reachedMemory) { const memEl = document.getElementById('animMem'); if (memEl) { memEl.classList.add('anim-active', 'anim-accessed'); const statusEl = memEl.querySelector('.anim-status'); if (statusEl) statusEl.textContent = 'Accessed'; } } }
+
+        // --- Animation Control Functions (Unchanged) ---
+        function processOneStep() { if (!simulatorInstance || isAnimationPaused || currentAddressIndex >= addressTrace.length ) { isAnimationRunning = false; if (currentAddressIndex >= addressTrace.length && simulatorInstance) { finalizeSimulation(); } return; } isAnimationRunning = true; try { const address = addressTrace[currentAddressIndex]; const stepDetails = simulatorInstance.accessMemoryStep(address); stepCounterEl.textContent = (currentAddressIndex + 1).toString(); updateStepVisualization(stepDetails); currentAddressIndex++; if (currentAddressIndex < addressTrace.length) { const delay = animationDelay <= 0 ? 0 : animationDelay; animationTimerId = setTimeout(processOneStep, delay); } else { const delay = animationDelay <= 0 ? 0 : animationDelay; animationTimerId = setTimeout(finalizeSimulation, delay); } } catch (error) { console.error("Error during simulation step:", error); showMessage(`Runtime Error: ${error.message}`, true); finalizeSimulation(true); isAnimationRunning = false; isAnimationPaused = true; clearTimeout(animationTimerId); animationTimerId = null; setConfigEditable(true); startBtn.disabled = true; pauseBtn.disabled = true; resumeBtn.disabled = true; loadResetBtn.disabled = false; loadResetBtn.textContent = 'Load Trace & Reset Sim'; } }
+        function startAnimation() { if (isAnimationRunning || isAnimationPaused || !simulatorInstance || currentAddressIndex >= addressTrace.length) { console.warn("Start animation called in invalid state."); return; } isAnimationPaused = false; isAnimationRunning = true; startBtn.disabled = true; pauseBtn.disabled = false; resumeBtn.disabled = true; loadResetBtn.disabled = true; setConfigEditable(false); stepViewSection.classList.remove('hidden'); resultsSection.classList.add('hidden'); showMessage('Animation started...', false); console.log("Animation started..."); clearTimeout(animationTimerId); processOneStep(); }
+        function pauseAnimation() { if (!isAnimationRunning || isAnimationPaused) return; isAnimationPaused = true; isAnimationRunning = false; clearTimeout(animationTimerId); animationTimerId = null; startBtn.disabled = true; pauseBtn.disabled = true; resumeBtn.disabled = false; loadResetBtn.disabled = false; showMessage('Animation paused.', false); console.log("Animation paused."); }
+        function resumeAnimation() { if (!isAnimationPaused || isAnimationRunning || !simulatorInstance || currentAddressIndex >= addressTrace.length) { console.warn("Resume animation called in invalid state."); return; } isAnimationPaused = false; startBtn.disabled = true; pauseBtn.disabled = false; resumeBtn.disabled = true; loadResetBtn.disabled = true; showMessage('Animation resumed...', false); console.log("Animation resumed..."); clearTimeout(animationTimerId); processOneStep(); }
+        function finalizeSimulation(isError = false) { console.log("Finalizing simulation..."); if (!simulatorInstance) { console.warn("Finalize called without simulator instance."); return; } isAnimationRunning = false; isAnimationPaused = true; clearTimeout(animationTimerId); animationTimerId = null; if (!isError) { showMessage("Simulation finished. Displaying final results.", false); try { const results = simulatorInstance.getResults(); displayTree(results); displayCharts(results); if(localityData && localityData.length > 0) { displayLocalityChart(localityData, addressTrace.length > LOCALITY_PLOT_MAX_POINTS); } else { if (activeCharts.locality instanceof Chart) { activeCharts.locality.destroy(); } localityNoteEl.textContent = 'No locality data to display.'; } document.getElementById('totalAccesses').textContent = results.totalAccesses.toString(); document.getElementById('totalCycles').textContent = results.totalCycles.toString(); document.getElementById('amat').textContent = results.amat.toFixed(4); document.getElementById('l1Accesses').textContent = results.l1.accesses.toString(); document.getElementById('l1Hits').textContent = results.l1.hits.toString(); document.getElementById('l1Misses').textContent = results.l1.misses.toString(); document.getElementById('l1HitRate').textContent = (results.l1.hitRate * 100).toFixed(2) + '%'; document.getElementById('l1MissRate').textContent = (results.l1.missRate * 100).toFixed(2) + '%'; document.getElementById('l2Accesses').textContent = results.l2.accesses.toString(); document.getElementById('l2Hits').textContent = results.l2.hits.toString(); document.getElementById('l2Misses').textContent = results.l2.misses.toString(); document.getElementById('l2HitRate').textContent = (results.l2.hitRate * 100).toFixed(2) + '%'; document.getElementById('l2MissRate').textContent = (results.l2.missRate * 100).toFixed(2) + '%'; document.getElementById('l3Accesses').textContent = results.l3.accesses.toString(); document.getElementById('l3Hits').textContent = results.l3.hits.toString(); document.getElementById('l3Misses').textContent = results.l3.misses.toString(); document.getElementById('l3HitRate').textContent = (results.l3.hitRate * 100).toFixed(2) + '%'; document.getElementById('l3MissRate').textContent = (results.l3.missRate * 100).toFixed(2) + '%'; resultsSection.classList.remove('hidden'); } catch (e) { console.error("Error displaying final results:", e); showMessage("Error displaying final results.", true); resultsSection.classList.add('hidden'); } } else { resultsSection.classList.add('hidden'); } stepViewSection.classList.add('hidden'); setConfigEditable(true); loadResetBtn.textContent = 'Load Trace & Reset Sim'; loadResetBtn.disabled = false; startBtn.disabled = true; pauseBtn.disabled = true; resumeBtn.disabled = true; }
+
+        // --- === NEW: Trace Generation Function (JavaScript Translation) === ---
+        /**
+         * Generates a sequence of memory addresses exhibiting spatial and temporal locality.
+         * Translated from the provided Python script. Uses BigInt for addresses.
+         *
+         * @param {number} numOutputs The total number of addresses to generate.
+         * @param {string} startAddrHex The starting address of the range (e.g., "0x1000").
+         * @param {string} endAddrHex The ending address of the range (e.g., "0x5000").
+         * @param {number} stride The step size for spatial locality (typically 4 or 8).
+         * @returns {string[] | null} A list of hexadecimal address strings, or null on error.
+         */
+        function generateAddressesWithLocalityJS(numOutputs, startAddrHex, endAddrHex, stride) {
+            if (numOutputs <= 0) {
+                return [];
+            }
+
+            let startAddrInt, endAddrInt, strideBigInt;
+            try {
+                // Use BigInt for potentially large addresses
+                startAddrInt = BigInt(startAddrHex);
+                endAddrInt = BigInt(endAddrHex);
+                strideBigInt = BigInt(stride);
+                if (strideBigInt <= 0n) throw new Error("Stride must be positive.");
+            } catch (e) {
+                console.error("Error: Invalid address or stride format.", e);
+                throw new Error("Invalid address (must be hex like 0x...) or stride (must be positive integer).");
+            }
+
+            if (startAddrInt >= endAddrInt) {
+                throw new Error("Start address must be less than end address.");
+            }
+
+            // Align start address up to the nearest stride boundary
+            if (startAddrInt % strideBigInt !== 0n) {
+                startAddrInt = ((startAddrInt / strideBigInt) + 1n) * strideBigInt;
+            }
+
+            if (startAddrInt > endAddrInt) { // Check if alignment pushed start past end
+                 throw new Error(`Error: No valid addresses in the range [${startAddrHex}, ${endAddrHex}] after aligning start address with stride ${stride}.`);
+            }
+
+
+            const generatedAddressesInt = [];
+            const recentBlockStarts = []; // Keep track of BigInt block starts
+            const maxRecentBlocks = 10;
+            let currentAddr = -1n; // Use BigInt
+
+            // Helper for random integer between min (inclusive) and max (inclusive)
+            const getRandomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+            while (generatedAddressesInt.length < numOutputs) {
+                let revisitProbability = recentBlockStarts.length > 0 ? 0.4 : 0.0;
+                if (generatedAddressesInt.length > numOutputs * 0.7 && recentBlockStarts.length > 0) {
+                    revisitProbability = 0.6;
+                }
+
+                const choice = Math.random();
+
+                if (choice < revisitProbability && recentBlockStarts.length > 0) {
+                    // --- Temporal Locality: Revisit ---
+                    const blockIndexToRevisit = getRandomInt(0, recentBlockStarts.length - 1);
+                    currentAddr = recentBlockStarts[blockIndexToRevisit];
+
+                    if (Math.random() < 0.6) { // Just access start
+                        if (currentAddr <= endAddrInt) {
+                            generatedAddressesInt.push(currentAddr);
+                        }
+                    } else { // Short spatial burst from revisited block
+                        const burstLen = getRandomInt(1, 4);
+                        for (let i = 0; i < burstLen; i++) {
+                            const addrToAdd = currentAddr + BigInt(i) * strideBigInt;
+                            if (addrToAdd <= endAddrInt && generatedAddressesInt.length < numOutputs) {
+                                generatedAddressesInt.push(addrToAdd);
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    // --- Spatial Locality: New Block ---
+                    // Calculate number of possible start addresses aligned to stride (using BigInt)
+                    const range = endAddrInt - startAddrInt;
+                    if (range < 0n) break; // Should not happen, safety
+                    const possibleStartOffsets = range / strideBigInt; // BigInt division is floor
+
+                    // Pick random offset (as number, then convert to BigInt)
+                    // Need to handle potential large number of offsets carefully if range is massive
+                    let randomOffsetBlocks;
+                    if (possibleStartOffsets > BigInt(Number.MAX_SAFE_INTEGER)) {
+                         // Very large range, approximate random block - less likely needed
+                         console.warn("Address range extremely large, random selection might be less uniform");
+                         // For simplicity, pick within safe integer range if possible, otherwise clamp
+                         const maxRand = Number.MAX_SAFE_INTEGER;
+                         randomOffsetBlocks = BigInt(getRandomInt(0, maxRand)); // Needs better large random if truly needed
+                    } else {
+                         randomOffsetBlocks = BigInt(getRandomInt(0, Number(possibleStartOffsets)));
+                    }
+
+                    currentAddr = startAddrInt + randomOffsetBlocks * strideBigInt;
+
+                    // Ensure it's truly within bounds (paranoia check with BigInt)
+                    currentAddr = startAddrInt > currentAddr ? startAddrInt : currentAddr;
+                    currentAddr = endAddrInt < currentAddr ? endAddrInt : currentAddr;
+
+
+                    // Add to recent blocks (and manage size)
+                    if (!recentBlockStarts.some(addr => addr === currentAddr)) { // Check for existence
+                        recentBlockStarts.push(currentAddr);
+                        if (recentBlockStarts.length > maxRecentBlocks) {
+                            recentBlockStarts.shift(); // Remove oldest block start (FIFO)
+                        }
+                    }
+
+                    // Generate spatial burst
+                    const burstLen = getRandomInt(2, 6);
+                    for (let i = 0; i < burstLen; i++) {
+                        const addrToAdd = currentAddr + BigInt(i) * strideBigInt;
+                        if (addrToAdd <= endAddrInt && generatedAddressesInt.length < numOutputs) {
+                            generatedAddressesInt.push(addrToAdd);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                 // Ensure we don't exceed numOutputs within the loop
+                 if (generatedAddressesInt.length >= numOutputs) break;
+            }
+
+            // Format output as hex strings
+            const generatedAddressesHex = generatedAddressesInt
+                                            .slice(0, numOutputs) // Ensure exact count
+                                            .map(addr => `0x${addr.toString(16).toUpperCase()}`);
+
+            return generatedAddressesHex;
+        }
+
+
+        // --- Event Listeners and Main Logic ---
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log("DOM Loaded. Initializing...");
+            const policySelect = document.getElementById('policy');
+            const memLatencyInput = document.getElementById('memoryLatency');
+            const l1SizeInput = document.getElementById('l1Size'); const l1BlockSizeInput = document.getElementById('l1BlockSize'); const l1AssocInput = document.getElementById('l1Assoc'); const l1HitLatencyInput = document.getElementById('l1HitLatency');
+            const l2SizeInput = document.getElementById('l2Size'); const l2BlockSizeInput = document.getElementById('l2BlockSize'); const l2AssocInput = document.getElementById('l2Assoc'); const l2HitLatencyInput = document.getElementById('l2HitLatency');
+            const l3SizeInput = document.getElementById('l3Size'); const l3BlockSizeInput = document.getElementById('l3BlockSize'); const l3AssocInput = document.getElementById('l3Assoc'); const l3HitLatencyInput = document.getElementById('l3HitLatency');
+            // addressTraceInput already declared above
+
+            const updateBlockSizes = () => { const l1bs = l1BlockSizeInput.value; l2BlockSizeInput.value = l1bs; l3BlockSizeInput.value = l1bs; };
+            updateBlockSizes();
+            l1BlockSizeInput.addEventListener('input', updateBlockSizes); l1BlockSizeInput.addEventListener('change', updateBlockSizes);
+
+            // Speed Control Listener
+            speedControl.addEventListener('input', (e) => {
+                animationDelay = parseInt(e.target.value, 10);
+                speedValue.textContent = `${animationDelay}ms`;
+                console.log("Animation delay set to:", animationDelay);
+            });
+
+            // --- === NEW: Generate Trace Button Listener === ---
+            generateTraceBtn.addEventListener('click', () => {
+                 console.log("Generate Trace button clicked.");
+                 try {
+                     const numOutputs = parseInt(genNumAddressesInput.value, 10);
+                     const startAddrHex = genStartAddressInput.value;
+                     const endAddrHex = genEndAddressInput.value;
+                     const stride = parseInt(genStrideInput.value, 10);
+
+                     // Basic Input Validation
+                     if (isNaN(numOutputs) || numOutputs <= 0 || numOutputs > 100000) { // Added upper limit
+                         throw new Error("Number of addresses must be between 1 and 100,000.");
+                     }
+                     if (!startAddrHex || !startAddrHex.startsWith('0x') || startAddrHex.length <= 2) {
+                          throw new Error("Start Address must be a valid hex string (e.g., 0x1000).");
+                     }
+                      if (!endAddrHex || !endAddrHex.startsWith('0x') || endAddrHex.length <= 2) {
+                          throw new Error("End Address must be a valid hex string (e.g., 0x8000).");
+                     }
+                      if (isNaN(stride) || stride <= 0) {
+                          throw new Error("Stride must be a positive integer.");
+                     }
+
+
+                     // Call the generation function (may throw errors)
+                     const generatedList = generateAddressesWithLocalityJS(numOutputs, startAddrHex, endAddrHex, stride);
+
+                     if (generatedList) {
+                        // Format for textarea (comma-separated, with line breaks for readability)
+                        let outputStr = "";
+                        let lineLen = 0;
+                        const maxLineLen = 80; // Approx chars per line
+
+                        generatedList.forEach((addr, i) => {
+                             outputStr += addr;
+                             lineLen += addr.length;
+                             if (i < generatedList.length - 1) {
+                                 outputStr += ", ";
+                                 lineLen += 2;
+                                 if (lineLen > maxLineLen) {
+                                      outputStr += "\n"; // Add line break
+                                      lineLen = 0;
+                                 }
+                             }
+                        });
+
+                         // Populate the textarea
+                         addressTraceInput.value = outputStr;
+                         showMessage(`Generated ${generatedList.length} addresses with locality.`, false);
+                         console.log(`Generated ${generatedList.length} addresses.`);
+                     }
+                     // No 'else' needed, generateAddressesWithLocalityJS throws on error
+
+                 } catch (error) {
+                      console.error("Trace Generation Error:", error);
+                      showMessage(`Generation Error: ${error.message}`, true);
+                 }
+             });
+
+            // --- Load Trace & Reset Button Listener (Mostly Unchanged) ---
+            loadResetBtn.addEventListener('click', () => {
+                 console.log("Load/Reset button clicked.");
+                showMessage('Resetting and loading trace...', false);
+                resultsSection.classList.add('hidden'); stepViewSection.classList.add('hidden'); destroyCharts();
+                clearTimeout(animationTimerId); animationTimerId = null; isAnimationPaused = false; isAnimationRunning = false;
+                simulatorInstance = null; addressTrace = []; localityData = []; currentAddressIndex = 0;
+
+                try {
+                     // **Parsing logic remains the same - reads from addressTraceInput.value**
+                     const traceInputVal = addressTraceInput.value;
+                     const addressStrings = traceInputVal.split(',').map(s => trim(s)).filter(s => s.length > 0);
+                     let parseError = false; addressTrace = []; localityData = [];
+
+                     for (let i = 0; i < addressStrings.length; i++) {
+                         const str = addressStrings[i]; try { const addrBigInt = BigInt(str); addressTrace.push(addrBigInt);
+                             if (i < LOCALITY_PLOT_MAX_POINTS) { let addrNum; try { addrNum = Number(addrBigInt); if (!Number.isSafeInteger(addrNum)) { console.warn(`Address ${str} (index ${i}) too large for plot.`); addrNum = NaN; } } catch (numErr) { console.warn(`Cannot convert ${str} to number: ${numErr}`); addrNum = NaN; } if (!isNaN(addrNum)) { localityData.push({ x: i + 1, y: addrNum }); } }
+                         } catch (e) { console.warn(`Skipping invalid address: "${str}" at index ${i}. Error: ${e}`); parseError = true; }
+                     }
+                     if (parseError) { showMessage("Warning: Some addresses skipped during load.", true); }
+                     if (addressTrace.length === 0) { throw new Error("No valid addresses found in trace to load."); }
+                      console.log(`Parsed ${addressTrace.length} addresses for simulation.`);
+
+                    // Configuration gathering remains the same
+                    const parseIntChecked = (value, name, minVal = 0) => { const num = parseInt(value, 10); if (isNaN(num) || num < minVal) { throw new Error(`Invalid ${name}: "${value}". Must be num >= ${minVal}.`); } return num; };
+                    const policy = policySelect.value;
+                    const l1Config = { sizeBytes: parseIntChecked(l1SizeInput.value, 'L1 Size'), blockSizeBytes: parseIntChecked(l1BlockSizeInput.value, 'L1 Block', 1), associativity: parseIntChecked(l1AssocInput.value, 'L1 Assoc', 1), hitLatencyCycles: parseIntChecked(l1HitLatencyInput.value, 'L1 Latency'), policy: policy };
+                    const l2Config = { sizeBytes: parseIntChecked(l2SizeInput.value, 'L2 Size'), blockSizeBytes: l1Config.blockSizeBytes, associativity: parseIntChecked(l2AssocInput.value, 'L2 Assoc', 1), hitLatencyCycles: parseIntChecked(l2HitLatencyInput.value, 'L2 Latency'), policy: policy };
+                    const l3Config = { sizeBytes: parseIntChecked(l3SizeInput.value, 'L3 Size'), blockSizeBytes: l1Config.blockSizeBytes, associativity: parseIntChecked(l3AssocInput.value, 'L3 Assoc', 1), hitLatencyCycles: parseIntChecked(l3HitLatencyInput.value, 'L3 Latency'), policy: policy };
+                    const globalMemoryLatency = parseIntChecked(memLatencyInput.value, 'Memory Latency', 0);
+                    if (l1Config.sizeBytes > 0 && l1Config.blockSizeBytes > l1Config.sizeBytes) throw new Error("L1 Block > L1 Size."); if (l2Config.sizeBytes > 0 && l2Config.blockSizeBytes > l2Config.sizeBytes) throw new Error("L2 Block > L2 Size."); if (l3Config.sizeBytes > 0 && l3Config.blockSizeBytes > l3Config.sizeBytes) throw new Error("L3 Block > L3 Size.");
+                    const simulatorConfig = { l1Config, l2Config, l3Config, memoryLatencyCycles: globalMemoryLatency, policy };
+
+                    simulatorInstance = new CacheSimulator(simulatorConfig); currentAddressIndex = 0;
+
+                    // **UI State Update: Now also disable generation inputs when running**
+                    setConfigEditable(false); // Locks ALL config including generation
+                    startBtn.disabled = false; pauseBtn.disabled = true; resumeBtn.disabled = true;
+                    loadResetBtn.textContent = 'Reset Simulation';
+                    stepCounterEl.textContent = '0'; stepTotalEl.textContent = addressTrace.length.toString();
+                    showMessage(`Trace loaded (${addressTrace.length} addresses). Ready.`, false); console.log("Simulator ready.");
+
+                } catch (error) {
+                    console.error("Load/Reset Error:", error); showMessage(`Error: ${error.message}`, true);
+                    simulatorInstance = null; addressTrace = []; localityData = []; currentAddressIndex = 0;
+                    setConfigEditable(true); // Re-enable ALL config on error
+                    startBtn.disabled = true; pauseBtn.disabled = true; resumeBtn.disabled = true;
+                    loadResetBtn.textContent = 'Load Trace & Reset Sim';
+                    resultsSection.classList.add('hidden'); stepViewSection.classList.add('hidden'); destroyCharts();
+                }
+            });
+
+            // --- Animation Control Button Listeners (Unchanged) ---
+            startBtn.addEventListener('click', startAnimation);
+            pauseBtn.addEventListener('click', pauseAnimation);
+            resumeBtn.addEventListener('click', resumeAnimation);
+
+            // --- Initial Page Load State ---
+            // **Enable generation inputs initially**
+            setConfigEditable(true);
+            startBtn.disabled = true; pauseBtn.disabled = true; resumeBtn.disabled = true;
+            speedValue.textContent = `${animationDelay}ms`;
+            speedControl.value = animationDelay;
+            console.log("Initial UI state set.");
+
+        }); // End DOMContentLoaded
+    </script>
+</body>
+</html>
